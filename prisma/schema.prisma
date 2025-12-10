@@ -1,0 +1,39 @@
+// This is your Prisma schema file
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id // Matches Clerk User ID
+  email     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Subscription fields
+  stripeCustomerId String?
+  isPro           Boolean @default(false)
+  
+  // Relations
+  documents Document[]
+}
+
+model Document {
+  id        String   @id @default(uuid())
+  url       String
+  title     String?
+  siteName  String?
+  createdAt DateTime @default(now())
+  
+  // The processed content (stored so user can retrieve later)
+  markdown  String?  @db.Text
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
