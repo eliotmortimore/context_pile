@@ -3,7 +3,7 @@ import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import TurndownService from 'turndown';
 import DOMPurify from 'isomorphic-dompurify';
-import { YoutubeTranscript } from 'youtube-transcript';
+import { YoutubeTranscript } from '@danielxceron/youtube-transcript';
 
 // Helper to validate YouTube URL
 const isYoutubeUrl = (url: string) => {
