@@ -66,7 +66,14 @@ export default function Home() {
         body: JSON.stringify({ url: doc.url }),
       });
 
-      const data = await res.json();
+      // Safe JSON parsing to prevent "Unexpected end of JSON" crash
+      const text = await res.text();
+      let data;
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (e) {
+        throw new Error(`Server Error: Response was not valid JSON (${res.status}). Likely a timeout.`);
+      }
 
       if (!res.ok) {
         throw new Error(data.error || 'Failed to fetch');

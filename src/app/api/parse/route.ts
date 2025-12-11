@@ -75,6 +75,20 @@ async function getYouTubeMetadata(url: string) {
   }
 }
 
+// Helper to fetch transcript with timeout
+async function fetchTranscriptWithTimeout(url: string) {
+  try {
+    const transcriptPromise = YoutubeTranscript.fetchTranscript(url);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Transcript fetch timed out")), 5000)
+    );
+    return await Promise.race([transcriptPromise, timeoutPromise]);
+  } catch (e) {
+    console.error("Transcript fetch failed:", e);
+    return null;
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const { url } = await request.json();
@@ -94,10 +108,7 @@ export async function POST(request: Request) {
       // --- YOUTUBE MODE (NATIVE NODE.JS) ---
       try {
         const [transcript, metadata] = await Promise.all([
-             YoutubeTranscript.fetchTranscript(url).catch(e => {
-                 console.error("Transcript fetch failed:", e);
-                 return null;
-             }),
+             fetchTranscriptWithTimeout(url),
              getYouTubeMetadata(url)
         ]);
 
