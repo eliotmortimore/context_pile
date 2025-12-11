@@ -11,20 +11,25 @@
   "dependencies": {
     "@clerk/nextjs": "^6.36.1",
     "@mozilla/readability": "^0.6.0",
+    "@prisma/adapter-pg": "^7.1.0",
     "@prisma/client": "^7.1.0",
+    "dotenv": "^17.2.3",
     "isomorphic-dompurify": "^2.30.0",
     "jsdom": "^27.3.0",
     "lucide-react": "^0.556.0",
     "next": "16.0.8",
+    "pg": "^8.16.3",
     "react": "19.2.1",
     "react-dom": "19.2.1",
-    "turndown": "^7.2.2"
+    "turndown": "^7.2.2",
+    "youtube-transcript": "^1.2.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@tailwindcss/typography": "^0.5.19",
     "@types/jsdom": "^27.0.0",
     "@types/node": "^20",
+    "@types/pg": "^8.16.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/turndown": "^5.0.6",
