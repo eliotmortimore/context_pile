@@ -36,10 +36,27 @@ async function getYouTubeMetadata(url: string) {
       description: ''
     };
 
+    // Attempt to get OEmbed if title is generic
+    if (metadata.title === 'Unknown Title' || metadata.title === 'YouTube') {
+       try {
+         const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
+         const oembedRes = await fetch(oembedUrl);
+         if (oembedRes.ok) {
+            const oembedData = await oembedRes.json();
+            metadata.title = oembedData.title || metadata.title;
+            metadata.channel = oembedData.author_name || metadata.channel;
+         }
+       } catch (e) {
+         // Ignore oembed failure
+       }
+    }
+
     // Channel Name
     const itempropName = doc.querySelector('link[itemprop="name"]')?.getAttribute('content');
     const ogSiteName = doc.querySelector('meta[property="og:site_name"]')?.getAttribute('content');
-    metadata.channel = itempropName || ogSiteName || 'YouTube';
+    if (metadata.channel === 'YouTube') {
+        metadata.channel = itempropName || ogSiteName || 'YouTube';
+    }
 
     // Description from OG (Fallback)
     metadata.description = doc.querySelector('meta[property="og:description"]')?.getAttribute('content') || '';
