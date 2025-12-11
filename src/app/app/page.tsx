@@ -89,7 +89,7 @@ export default function Dashboard() {
   const processDoc = async (doc: DocItem) => {
     updateDocStatus(doc.id, 'processing');
     try {
-      const res = await fetch('/api/process', {
+      const res = await fetch('/api/processor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: doc.url }),

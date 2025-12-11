@@ -3,7 +3,7 @@ import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 // Define routes that should be protected
 // We allow the home page ('/') to be public so visitors can see what the app is
 // But we might want to protect the API or dashboard features later
-const isProtectedRoute = createRouteMatcher(['/dashboard(.*)', '/api/parse'])
+const isProtectedRoute = createRouteMatcher(['/dashboard(.*)', '/api(.*)'])
 
 export default clerkMiddleware(async (auth, req) => {
   if (isProtectedRoute(req)) await auth.protect()

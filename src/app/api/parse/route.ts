@@ -3,7 +3,10 @@ import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import TurndownService from 'turndown';
 import DOMPurify from 'isomorphic-dompurify';
-import { YoutubeTranscript } from 'youtube-transcript';
+import { YoutubeTranscript } from '@danielxceron/youtube-transcript';
+
+// Force Node.js runtime
+export const runtime = 'nodejs';
 
 // Helper to validate YouTube URL
 const isYoutubeUrl = (url: string) => {
@@ -13,12 +16,17 @@ const isYoutubeUrl = (url: string) => {
 // Helper to scrape full YouTube metadata (including full description)
 async function getYouTubeMetadata(url: string) {
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+
     const response = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Accept-Language': 'en-US,en;q=0.9',
-      }
+      },
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
 
     if (!response.ok) return null;
     const html = await response.text();
@@ -31,10 +39,27 @@ async function getYouTubeMetadata(url: string) {
       description: ''
     };
 
+    // Attempt to get OEmbed if title is generic
+    if (metadata.title === 'Unknown Title' || metadata.title === 'YouTube') {
+       try {
+         const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
+         const oembedRes = await fetch(oembedUrl);
+         if (oembedRes.ok) {
+            const oembedData = await oembedRes.json();
+            metadata.title = oembedData.title || metadata.title;
+            metadata.channel = oembedData.author_name || metadata.channel;
+         }
+       } catch (e) {
+         // Ignore oembed failure
+       }
+    }
+
     // Channel Name
     const itempropName = doc.querySelector('link[itemprop="name"]')?.getAttribute('content');
     const ogSiteName = doc.querySelector('meta[property="og:site_name"]')?.getAttribute('content');
-    metadata.channel = itempropName || ogSiteName || 'YouTube';
+    if (metadata.channel === 'YouTube') {
+        metadata.channel = itempropName || ogSiteName || 'YouTube';
+    }
 
     // Description from OG (Fallback)
     metadata.description = doc.querySelector('meta[property="og:description"]')?.getAttribute('content') || '';
@@ -70,6 +95,20 @@ async function getYouTubeMetadata(url: string) {
   }
 }
 
+// Helper to fetch transcript with timeout
+async function fetchTranscriptWithTimeout(url: string): Promise<any[] | null> {
+  try {
+    const transcriptPromise = YoutubeTranscript.fetchTranscript(url);
+    const timeoutPromise = new Promise<null>((_, reject) =>
+      setTimeout(() => reject(new Error("Transcript fetch timed out")), 5000)
+    );
+    return await Promise.race([transcriptPromise, timeoutPromise]) as any[] | null;
+  } catch (e) {
+    console.error("Transcript fetch failed:", e);
+    return null;
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const { url } = await request.json();
@@ -89,10 +128,7 @@ export async function POST(request: Request) {
       // --- YOUTUBE MODE (NATIVE NODE.JS) ---
       try {
         const [transcript, metadata] = await Promise.all([
-             YoutubeTranscript.fetchTranscript(url).catch(e => {
-                 console.error("Transcript fetch failed:", e);
-                 return null;
-             }),
+             fetchTranscriptWithTimeout(url),
              getYouTubeMetadata(url)
         ]);
 
@@ -122,7 +158,7 @@ export async function POST(request: Request) {
         
         if (transcript && Array.isArray(transcript)) {
              htmlContent += `<ul>`;
-             transcript.forEach((item: any) => {
+             (transcript as any[]).forEach((item: any) => {
                 const minutes = Math.floor(item.offset / 1000 / 60);
                 const seconds = Math.floor((item.offset / 1000) % 60).toString().padStart(2, '0');
                 const timestamp = `${minutes}:${seconds}`;
