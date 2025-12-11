@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Clipboard, FileDown, Loader2, FileText, Code, Eye, Plus, Trash2, Play, CheckCircle2, XCircle, LogIn, ChevronRight } from 'lucide-react';
+import { Clipboard, FileDown, Loader2, FileText, Code, Eye, Plus, Trash2, Play, CheckCircle2, XCircle, LogIn } from 'lucide-react';
 import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
 
 interface ParseResult {
@@ -25,7 +25,7 @@ interface DocItem {
 }
 
 export default function Home() {
-  const { isSignedIn, user, isLoaded } = useUser();
+  const { isSignedIn, isLoaded } = useUser();
   const [inputUrls, setInputUrls] = useState('');
   const [documents, setDocuments] = useState<DocItem[]>([]);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
@@ -63,7 +63,7 @@ export default function Home() {
 
     try {
       // Step 1: Initial Processing (Metadata / Web Scrape)
-      const res = await fetch('/api/process', {
+      const res = await fetch('/api/processor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: doc.url }),
@@ -95,7 +95,7 @@ export default function Home() {
          setSelectedDocId(curr => curr === null ? doc.id : curr);
 
          // Step 2: Fetch Transcript
-         const transcriptRes = await fetch('/api/process/transcript', {
+         const transcriptRes = await fetch('/api/processor/transcript', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ docId: data.id, url: doc.url }),
