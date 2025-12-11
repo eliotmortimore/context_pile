@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { YoutubeTranscript } from '@danielxceron/youtube-transcript';
 
+// Force Node.js runtime
+export const runtime = 'nodejs';
+
 // Simpler transcript endpoint that doesn't require DB
 // Just fetches and returns the transcript directly
 

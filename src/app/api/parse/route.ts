@@ -5,6 +5,9 @@ import TurndownService from 'turndown';
 import DOMPurify from 'isomorphic-dompurify';
 import { YoutubeTranscript } from '@danielxceron/youtube-transcript';
 
+// Force Node.js runtime
+export const runtime = 'nodejs';
+
 // Helper to validate YouTube URL
 const isYoutubeUrl = (url: string) => {
   return url.includes('youtube.com') || url.includes('youtu.be');

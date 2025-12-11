@@ -3,6 +3,9 @@ import { currentUser } from '@clerk/nextjs/server';
 import { prisma } from '@/lib/db';
 import { YoutubeTranscript } from '@danielxceron/youtube-transcript';
 
+// Force Node.js runtime
+export const runtime = 'nodejs';
+
 // Helper to fetch transcript with timeout
 async function fetchTranscriptWithTimeout(url: string): Promise<any[] | null> {
   try {
