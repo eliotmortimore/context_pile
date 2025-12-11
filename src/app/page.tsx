@@ -83,52 +83,48 @@ export default function Home() {
       }
 
       // If it needs a transcript (YouTube), we enter phase 2
-      if (data.needsTranscript && data.id) {
+      if (data.needsTranscript) {
          // Update with partial result immediately so user sees Title/Desc
-         setDocuments(prev => prev.map(d => 
-            d.id === doc.id 
-              ? { ...d, status: 'processing-transcript', result: data } 
+         setDocuments(prev => prev.map(d =>
+            d.id === doc.id
+              ? { ...d, status: 'processing-transcript', result: data }
               : d
           ));
-         
+
          // Auto-select if it's the first one
          setSelectedDocId(curr => curr === null ? doc.id : curr);
 
-         // Step 2: Fetch Transcript
-         const transcriptRes = await fetch('/api/processor/transcript', {
+         // Step 2: Fetch Transcript (using simpler endpoint that doesn't need DB)
+         const transcriptRes = await fetch('/api/transcript', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ docId: data.id, url: doc.url }),
+            body: JSON.stringify({ url: doc.url }),
          });
-         
+
          const transcriptData = await transcriptRes.json();
-         
-         if (transcriptData.success && transcriptData.markdown) {
-            // Update with full transcript
-             setDocuments(prev => prev.map(d => 
-                d.id === doc.id 
-                  ? { 
-                      ...d, 
-                      status: 'success', 
-                      result: { 
-                          ...data, 
-                          markdown: transcriptData.markdown,
-                          // We also update textContent/content to include transcript roughly
-                          // For now, simpler to just update markdown as that's the primary output
-                          // But let's try to append to textContent too for consistency
+
+         if (transcriptData.success && transcriptData.transcript) {
+            // Update with full transcript - append to existing markdown
+            const fullMarkdown = data.markdown.replace('_Fetching transcript..._', '') + transcriptData.transcript;
+             setDocuments(prev => prev.map(d =>
+                d.id === doc.id
+                  ? {
+                      ...d,
+                      status: 'success',
+                      result: {
+                          ...data,
+                          markdown: fullMarkdown,
                           textContent: data.textContent + "\n\n(Transcript added)",
                           content: data.content + "<p><em>Transcript added. Switch to Markdown view to see timestamps.</em></p>"
-                      } 
-                    } 
+                      }
+                    }
                   : d
               ));
          } else {
-             // Failed to get transcript, but we have metadata. 
-             // We can mark as success but maybe with a warning? 
-             // Or just leave it as is (the API returns error text in markdown if failed)
-             setDocuments(prev => prev.map(d => 
-                d.id === doc.id 
-                  ? { ...d, status: 'success', result: data } 
+             // Failed to get transcript, but we have metadata
+             setDocuments(prev => prev.map(d =>
+                d.id === doc.id
+                  ? { ...d, status: 'success', result: data }
                   : d
               ));
          }
