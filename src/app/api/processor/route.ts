@@ -88,6 +88,12 @@ async function getYouTubeMetadata(url: string) {
   }
 }
 
+// 1. ADD GET Handler to test route availability
+export async function GET() {
+    return NextResponse.json({ status: 'Processor API is ready' });
+}
+
+// 2. Main POST Handler
 export async function POST(request: Request) {
   try {
     // 1. Auth Check
