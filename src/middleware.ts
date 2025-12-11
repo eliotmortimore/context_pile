@@ -1,12 +1,26 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
+import { NextResponse } from 'next/server'
 
 // Define routes that should be protected
-// We allow the home page ('/') to be public so visitors can see what the app is
-// But we might want to protect the API or dashboard features later
-const isProtectedRoute = createRouteMatcher(['/dashboard(.*)', '/api(.*)'])
+const isProtectedRoute = createRouteMatcher(['/dashboard(.*)'])
+const isApiRoute = createRouteMatcher(['/api(.*)'])
 
 export default clerkMiddleware(async (auth, req) => {
-  if (isProtectedRoute(req)) await auth.protect()
+  // For API routes, check auth but return 401 JSON instead of redirecting
+  if (isApiRoute(req)) {
+    const { userId } = await auth()
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      )
+    }
+  }
+
+  // For dashboard routes, use standard protect (redirects to sign-in)
+  if (isProtectedRoute(req)) {
+    await auth.protect()
+  }
 })
 
 export const config = {
