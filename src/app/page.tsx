@@ -1,23 +1,25 @@
 'use client';
 
 import { useState } from 'react';
-import { Clipboard, FileDown, Loader2, FileText, Code, Eye, Plus, Trash2, Play, CheckCircle2, XCircle, ChevronRight, LogIn } from 'lucide-react';
+import { Clipboard, FileDown, Loader2, FileText, Code, Eye, Plus, Trash2, Play, CheckCircle2, XCircle, LogIn, ChevronRight } from 'lucide-react';
 import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
 
 interface ParseResult {
+  id?: string;
   title: string;
   content: string; // HTML
   textContent: string;
   markdown: string;
   siteName: string;
-  byline: string;
-  excerpt: string;
+  byline?: string;
+  excerpt?: string;
+  needsTranscript?: boolean; // New Flag
 }
 
 interface DocItem {
   id: string;
   url: string;
-  status: 'pending' | 'processing' | 'success' | 'error';
+  status: 'pending' | 'processing' | 'processing-transcript' | 'success' | 'error';
   result?: ParseResult;
   error?: string;
 }
@@ -60,7 +62,8 @@ export default function Home() {
     updateDocStatus(doc.id, 'processing');
 
     try {
-      const res = await fetch('/api/parse', {
+      // Step 1: Initial Processing (Metadata / Web Scrape)
+      const res = await fetch('/api/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: doc.url }),
@@ -68,7 +71,7 @@ export default function Home() {
 
       // Safe JSON parsing to prevent "Unexpected end of JSON" crash
       const text = await res.text();
-      let data;
+      let data: ParseResult;
       try {
         data = text ? JSON.parse(text) : {};
       } catch (e) {
@@ -76,18 +79,71 @@ export default function Home() {
       }
 
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to fetch');
+        throw new Error((data as any).error || 'Failed to fetch');
       }
 
-      // Update success
-      setDocuments(prev => prev.map(d => 
-        d.id === doc.id 
-          ? { ...d, status: 'success', result: data } 
-          : d
-      ));
-      
-      // Auto-select if it's the first one
-      setSelectedDocId(curr => curr === null ? doc.id : curr);
+      // If it needs a transcript (YouTube), we enter phase 2
+      if (data.needsTranscript && data.id) {
+         // Update with partial result immediately so user sees Title/Desc
+         setDocuments(prev => prev.map(d => 
+            d.id === doc.id 
+              ? { ...d, status: 'processing-transcript', result: data } 
+              : d
+          ));
+         
+         // Auto-select if it's the first one
+         setSelectedDocId(curr => curr === null ? doc.id : curr);
+
+         // Step 2: Fetch Transcript
+         const transcriptRes = await fetch('/api/process/transcript', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ docId: data.id, url: doc.url }),
+         });
+         
+         const transcriptData = await transcriptRes.json();
+         
+         if (transcriptData.success && transcriptData.markdown) {
+            // Update with full transcript
+             setDocuments(prev => prev.map(d => 
+                d.id === doc.id 
+                  ? { 
+                      ...d, 
+                      status: 'success', 
+                      result: { 
+                          ...data, 
+                          markdown: transcriptData.markdown,
+                          // We also update textContent/content to include transcript roughly
+                          // For now, simpler to just update markdown as that's the primary output
+                          // But let's try to append to textContent too for consistency
+                          textContent: data.textContent + "\n\n(Transcript added)",
+                          content: data.content + "<p><em>Transcript added. Switch to Markdown view to see timestamps.</em></p>"
+                      } 
+                    } 
+                  : d
+              ));
+         } else {
+             // Failed to get transcript, but we have metadata. 
+             // We can mark as success but maybe with a warning? 
+             // Or just leave it as is (the API returns error text in markdown if failed)
+             setDocuments(prev => prev.map(d => 
+                d.id === doc.id 
+                  ? { ...d, status: 'success', result: data } 
+                  : d
+              ));
+         }
+
+      } else {
+          // Standard success
+          setDocuments(prev => prev.map(d => 
+            d.id === doc.id 
+              ? { ...d, status: 'success', result: data } 
+              : d
+          ));
+          
+          // Auto-select if it's the first one
+          setSelectedDocId(curr => curr === null ? doc.id : curr);
+      }
 
     } catch (err: any) {
       // Update error
@@ -191,6 +247,7 @@ export default function Home() {
             >
               <div className="flex items-center gap-3 overflow-hidden">
                 {doc.status === 'processing' && <Loader2 className="w-4 h-4 text-blue-500 animate-spin shrink-0" />}
+                {doc.status === 'processing-transcript' && <Loader2 className="w-4 h-4 text-purple-500 animate-spin shrink-0" />}
                 {doc.status === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />}
                 {doc.status === 'error' && <XCircle className="w-4 h-4 text-red-500 shrink-0" />}
                 {doc.status === 'pending' && <div className="w-4 h-4 rounded-full border-2 border-zinc-600 shrink-0" />}
@@ -222,12 +279,19 @@ export default function Home() {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col bg-[#0a0a0a] min-w-0">
-        {selectedDoc && selectedDoc.status === 'success' && selectedDoc.result ? (
+        {selectedDoc && (selectedDoc.status === 'success' || selectedDoc.status === 'processing-transcript') && selectedDoc.result ? (
           <>
             {/* Header */}
             <header className="h-16 flex items-center justify-between px-6 border-b border-zinc-800 bg-[#0f0f0f]">
               <div className="min-w-0">
-                <h2 className="text-lg font-semibold text-white truncate">{selectedDoc.result.title}</h2>
+                <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-semibold text-white truncate">{selectedDoc.result.title}</h2>
+                    {selectedDoc.status === 'processing-transcript' && (
+                        <span className="text-xs bg-purple-500/10 text-purple-400 px-2 py-0.5 rounded-full animate-pulse border border-purple-500/20">
+                            Fetching Transcript...
+                        </span>
+                    )}
+                </div>
                 <div className="flex items-center gap-4 text-xs text-zinc-500">
                    {selectedDoc.result.byline && <span>By {selectedDoc.result.byline}</span>}
                    <a href={selectedDoc.url} target="_blank" rel="noopener" className="hover:text-blue-400 truncate max-w-xs">{selectedDoc.url}</a>

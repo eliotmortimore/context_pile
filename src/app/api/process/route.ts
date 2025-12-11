@@ -5,7 +5,6 @@ import TurndownService from 'turndown';
 import DOMPurify from 'isomorphic-dompurify';
 import { currentUser } from '@clerk/nextjs/server';
 import { prisma } from '@/lib/db';
-import { YoutubeTranscript } from 'youtube-transcript';
 
 // Helper to validate YouTube URL
 const isYoutubeUrl = (url: string) => {
@@ -33,7 +32,7 @@ async function getYouTubeMetadata(url: string) {
       description: ''
     };
 
-    // Attempt to get OEmbed if title is generic, which likely means scraping failed or returned a consent page
+    // Attempt to get OEmbed if title is generic
     if (metadata.title === 'Unknown Title' || metadata.title === 'YouTube') {
        try {
          const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
@@ -89,29 +88,15 @@ async function getYouTubeMetadata(url: string) {
   }
 }
 
-// Helper to fetch transcript with timeout
-async function fetchTranscriptWithTimeout(url: string): Promise<any[] | null> {
-  try {
-    const transcriptPromise = YoutubeTranscript.fetchTranscript(url);
-    const timeoutPromise = new Promise<null>((_, reject) =>
-      setTimeout(() => reject(new Error("Transcript fetch timed out")), 5000)
-    );
-    return await Promise.race([transcriptPromise, timeoutPromise]) as any[] | null;
-  } catch (e) {
-    console.error("Transcript fetch failed:", e);
-    return null;
-  }
-}
-
 export async function POST(request: Request) {
   try {
-    // 1. Auth Check (Fail fast)
+    // 1. Auth Check
     const user = await currentUser();
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // 2. Limit Check (20 Docs for Free Users)
+    // 2. Limit Check
     const isPro = (user.publicMetadata as any).isPro === true;
     if (!isPro) {
       const docCount = await prisma.document.count({
@@ -125,7 +110,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // 3. Parse Body safely
+    // 3. Parse Body
     let body;
     const text = await request.text();
     try {
@@ -137,7 +122,7 @@ export async function POST(request: Request) {
     const { url } = body;
     if (!url) return NextResponse.json({ error: 'URL is required' }, { status: 400 });
 
-    // 4. User Sync (Upsert)
+    // 4. User Sync
     try {
       await prisma.user.upsert({
         where: { id: user.id },
@@ -152,47 +137,48 @@ export async function POST(request: Request) {
     let title = '';
     let markdown = '';
     let siteName = '';
+    let content = '';
+    let textContent = '';
+    let needsTranscript = false;
 
     if (isYoutubeUrl(url)) {
-      // --- YOUTUBE MODE ---
+      // --- YOUTUBE METADATA MODE (FAST) ---
       siteName = 'YouTube';
       
       try {
-        const [transcript, metadata] = await Promise.all([
-          fetchTranscriptWithTimeout(url),
-          getYouTubeMetadata(url)
-        ]);
+        // Fetch ONLY metadata, skip transcript for now
+        const metadata = await getYouTubeMetadata(url);
         
-        // Use metadata if available
         title = metadata?.title || `YouTube Transcript: ${url}`;
         siteName = metadata?.channel || 'YouTube';
         
-        // Construct Rich Markdown
+        // Construct Initial Markdown
         markdown = `# ${title}\n`;
         markdown += `**Channel:** ${siteName} | **Source:** [YouTube](${url})\n\n`;
         
         if (metadata?.description) {
           markdown += `> ${metadata.description}\n\n`;
         }
+
+        // Placeholder for transcript
+        markdown += `_Fetching transcript..._`;
+
+        // Construct HTML/Text
+        content = `<h1>${title}</h1><p><strong>Channel:</strong> ${siteName}</p>`;
+        if (metadata?.description) content += `<blockquote>${metadata.description}</blockquote>`;
+        content += `<p><em>Fetching transcript...</em></p>`;
+
+        textContent = `${title}\nChannel: ${siteName}\n\n${metadata?.description || ''}\n\nFetching transcript...`;
         
-        if (!transcript) {
-          markdown += `**Error:** Could not fetch transcript (Captions might be disabled)\n\n`;
-        } else if (Array.isArray(transcript)) {
-          markdown += `## Transcript\n\n`;
-          (transcript as any[]).forEach((item: any) => {
-            const minutes = Math.floor(item.offset / 1000 / 60);
-            const seconds = Math.floor((item.offset / 1000) % 60).toString().padStart(2, '0');
-            markdown += `**${minutes}:${seconds}** - ${item.text}\n\n`;
-          });
-        }
-        
+        needsTranscript = true;
+
       } catch (ytError: any) {
-        console.error("YouTube Error:", ytError);
+        console.error("YouTube Metadata Error:", ytError);
         return NextResponse.json({ error: 'Could not fetch YouTube data.' }, { status: 422 });
       }
 
     } else {
-      // --- WEB SCRAPER MODE ---
+      // --- WEB SCRAPER MODE (STANDARD) ---
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
@@ -221,6 +207,8 @@ export async function POST(request: Request) {
 
         title = article.title || 'Untitled';
         siteName = article.siteName || new URL(url).hostname;
+        content = article.content || '';
+        textContent = article.textContent || '';
         
         const turndownService = new TurndownService({
           headingStyle: 'atx',
@@ -255,8 +243,11 @@ export async function POST(request: Request) {
         id: savedDoc.id,
         title,
         markdown,
+        content,
+        textContent,
         siteName,
-        status: 'success'
+        status: 'success',
+        needsTranscript 
       });
 
     } catch (dbError: any) {
@@ -265,9 +256,12 @@ export async function POST(request: Request) {
         id: 'temp-' + crypto.randomUUID(),
         title,
         markdown,
+        content,
+        textContent,
         siteName,
         status: 'success',
-        warning: 'Could not save to history'
+        warning: 'Could not save to history',
+        needsTranscript 
       });
     }
 
