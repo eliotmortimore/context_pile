@@ -73,13 +73,13 @@ async function getYouTubeMetadata(url: string) {
 }
 
 // Helper to fetch transcript with timeout
-async function fetchTranscriptWithTimeout(url: string) {
+async function fetchTranscriptWithTimeout(url: string): Promise<any[] | null> {
   try {
     const transcriptPromise = YoutubeTranscript.fetchTranscript(url);
-    const timeoutPromise = new Promise((_, reject) =>
+    const timeoutPromise = new Promise<null>((_, reject) =>
       setTimeout(() => reject(new Error("Transcript fetch timed out")), 5000)
     );
-    return await Promise.race([transcriptPromise, timeoutPromise]);
+    return await Promise.race([transcriptPromise, timeoutPromise]) as any[] | null;
   } catch (e) {
     console.error("Transcript fetch failed:", e);
     return null;
@@ -160,9 +160,9 @@ export async function POST(request: Request) {
         
         if (!transcript) {
           markdown += `**Error:** Could not fetch transcript (Captions might be disabled)\n\n`;
-        } else {
+        } else if (Array.isArray(transcript)) {
           markdown += `## Transcript\n\n`;
-          transcript.forEach(item => {
+          (transcript as any[]).forEach((item: any) => {
             const minutes = Math.floor(item.offset / 1000 / 60);
             const seconds = Math.floor((item.offset / 1000) % 60).toString().padStart(2, '0');
             markdown += `**${minutes}:${seconds}** - ${item.text}\n\n`;
