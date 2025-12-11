@@ -13,12 +13,17 @@ const isYoutubeUrl = (url: string) => {
 // Helper to scrape full YouTube metadata (including full description)
 async function getYouTubeMetadata(url: string) {
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+
     const response = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Accept-Language': 'en-US,en;q=0.9',
-      }
+      },
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
 
     if (!response.ok) return null;
     const html = await response.text();
