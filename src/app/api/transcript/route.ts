@@ -1,20 +1,14 @@
 import { NextResponse } from 'next/server';
-import { currentUser } from '@clerk/nextjs/server';
 import { YoutubeTranscript } from '@danielxceron/youtube-transcript';
 
 // Force Node.js runtime
 export const runtime = 'nodejs';
 
-// Simpler transcript endpoint that doesn't require DB
+// Simpler transcript endpoint
 // Just fetches and returns the transcript directly
 
 export async function POST(request: Request) {
   try {
-    const user = await currentUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const { url } = await request.json();
 
     if (!url) {
