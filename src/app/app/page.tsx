@@ -1,8 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Clipboard, FileDown, Loader2, FileText, Code, Eye, Plus, Trash2, Play, CheckCircle2, XCircle, ChevronRight, LogIn } from 'lucide-react';
-import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
+import { useState } from 'react';
+import { Clipboard, FileDown, Loader2, FileText, Code, Eye, Plus, Trash2, Play, CheckCircle2, XCircle } from 'lucide-react';
 
 interface ParseResult {
   title: string;
@@ -20,64 +19,25 @@ interface DocItem {
 }
 
 export default function Dashboard() {
-  const { isSignedIn, isLoaded } = useUser();
   const [inputUrls, setInputUrls] = useState('');
   const [documents, setDocuments] = useState<DocItem[]>([]);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'markdown' | 'preview'>('markdown');
 
-  // Load History
-  useEffect(() => {
-    if (isSignedIn) {
-      fetch('/api/documents')
-        .then(async (res) => {
-          if (!res.ok) return [];
-          try {
-            return await res.json();
-          } catch (e) {
-             console.error("History JSON parse error");
-             return [];
-          }
-        })
-        .then(data => {
-          if (Array.isArray(data)) {
-            const historyDocs: DocItem[] = data.map((d: any) => ({
-              id: d.id,
-              url: d.url,
-              status: 'success',
-              createdAt: d.createdAt,
-              result: {
-                title: d.title || 'Untitled',
-                markdown: d.markdown || '',
-                siteName: d.siteName || '',
-              }
-            }));
-            setDocuments(prev => {
-              const currentIds = new Set(prev.map(p => p.id));
-              const newHistory = historyDocs.filter(h => !currentIds.has(h.id));
-              return [...newHistory, ...prev];
-            });
-          }
-        })
-        .catch(err => console.error('Failed to load history', err));
-    }
-  }, [isSignedIn]);
-
   // Parse URLs
   const handleCompile = async () => {
-    if (!isSignedIn) return;
     if (!inputUrls.trim()) return;
 
     const urls = inputUrls.split('\n').map(u => u.trim()).filter(u => u.length > 0);
-    
+
     // Create new doc items
     const newDocs: DocItem[] = urls.map(url => ({
-      id: crypto.randomUUID(), // Temp ID
+      id: crypto.randomUUID(),
       url,
       status: 'pending'
     }));
 
-    setDocuments(prev => [...newDocs, ...prev]); 
+    setDocuments(prev => [...newDocs, ...prev]);
     setInputUrls('');
 
     // Process
@@ -109,18 +69,18 @@ export default function Dashboard() {
       }
 
       // Update success
-      setDocuments(prev => prev.map(d => 
-        d.id === doc.id 
-          ? { ...d, id: data.id || d.id, status: 'success', result: data } 
+      setDocuments(prev => prev.map(d =>
+        d.id === doc.id
+          ? { ...d, id: data.id || d.id, status: 'success', result: data }
           : d
       ));
-      
+
       // Select it if none selected
       setSelectedDocId(prev => prev ? prev : (data.id || doc.id));
 
     } catch (err: any) {
       console.error("Processing failed:", err);
-      setDocuments(prev => prev.map(d => 
+      setDocuments(prev => prev.map(d =>
         d.id === doc.id ? { ...d, status: 'error', error: err.message } : d
       ));
     }
@@ -156,7 +116,7 @@ export default function Dashboard() {
 
   return (
     <div className="flex h-screen bg-[#0a0a0a] text-zinc-100 font-sans overflow-hidden">
-      
+
       {/* Sidebar */}
       <aside className="w-80 flex flex-col border-r border-zinc-800 bg-[#0f0f0f]">
         <div className="p-4 border-b border-zinc-800 flex justify-between items-center">
@@ -164,36 +124,23 @@ export default function Dashboard() {
             <div className="w-2 h-6 bg-blue-600 rounded-full"></div>
             ContextPile
           </h1>
-          {isLoaded && isSignedIn && <UserButton />}
         </div>
 
         {/* Input Area */}
         <div className="p-4 border-b border-zinc-800 space-y-3">
-          {isLoaded && !isSignedIn ? (
-             <div className="h-24 flex items-center justify-center bg-zinc-900 border border-zinc-700 rounded-lg border-dashed">
-               <SignInButton mode="modal">
-                 <button className="flex items-center gap-2 text-sm text-zinc-400 hover:text-white transition">
-                   <LogIn className="w-4 h-4" /> Sign in to compile
-                 </button>
-               </SignInButton>
-             </div>
-          ) : (
-            <>
-              <textarea
-                className="w-full h-24 bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-xs text-zinc-300 placeholder:text-zinc-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
-                placeholder="Paste URLs here (one per line)..."
-                value={inputUrls}
-                onChange={(e) => setInputUrls(e.target.value)}
-              />
-              <button
-                onClick={handleCompile}
-                disabled={!inputUrls.trim()}
-                className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium py-2 rounded-lg transition-colors"
-              >
-                <Play className="w-4 h-4" /> Compile
-              </button>
-            </>
-          )}
+          <textarea
+            className="w-full h-24 bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-xs text-zinc-300 placeholder:text-zinc-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
+            placeholder="Paste URLs here (one per line)..."
+            value={inputUrls}
+            onChange={(e) => setInputUrls(e.target.value)}
+          />
+          <button
+            onClick={handleCompile}
+            disabled={!inputUrls.trim()}
+            className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium py-2 rounded-lg transition-colors"
+          >
+            <Play className="w-4 h-4" /> Compile
+          </button>
         </div>
 
         {/* Document List */}
@@ -203,8 +150,8 @@ export default function Dashboard() {
               key={doc.id}
               onClick={() => setSelectedDocId(doc.id)}
               className={`group flex items-center justify-between p-3 rounded-lg cursor-pointer transition-colors ${
-                selectedDocId === doc.id 
-                  ? 'bg-zinc-800 border-zinc-700' 
+                selectedDocId === doc.id
+                  ? 'bg-zinc-800 border-zinc-700'
                   : 'hover:bg-zinc-900 border border-transparent'
               }`}
             >
@@ -213,7 +160,7 @@ export default function Dashboard() {
                 {doc.status === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />}
                 {doc.status === 'error' && <XCircle className="w-4 h-4 text-red-500 shrink-0" />}
                 {doc.status === 'pending' && <div className="w-4 h-4 rounded-full border-2 border-zinc-600 shrink-0" />}
-                
+
                 <div className="flex flex-col min-w-0">
                   <span className={`text-sm font-medium truncate ${selectedDocId === doc.id ? 'text-white' : 'text-zinc-400 group-hover:text-zinc-200'}`}>
                     {doc.result?.title || doc.url}
@@ -224,7 +171,7 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              <button 
+              <button
                 onClick={(e) => removeDoc(doc.id, e)}
                 className="opacity-0 group-hover:opacity-100 p-1 hover:bg-zinc-700 rounded text-zinc-500 hover:text-red-400 transition"
               >
