@@ -3,11 +3,123 @@ import { JSDOM } from 'jsdom';
 import { Readability } from '@mozilla/readability';
 import TurndownService from 'turndown';
 import DOMPurify from 'isomorphic-dompurify';
-import { currentUser } from '@clerk/nextjs/server';
-import { prisma } from '@/lib/db';
 
 // Force Node.js runtime (not Edge) - required for jsdom and other node-specific packages
 export const runtime = 'nodejs';
+
+// --- Extraction Helper Functions ---
+
+function extractHeadings(doc: Document): { level: number; text: string }[] {
+  const headings: { level: number; text: string }[] = [];
+  const headingElements = doc.querySelectorAll('h1, h2, h3, h4, h5, h6');
+  headingElements.forEach((el) => {
+    const level = parseInt(el.tagName.charAt(1));
+    const text = el.textContent?.trim() || '';
+    if (text) {
+      headings.push({ level, text });
+    }
+  });
+  return headings;
+}
+
+function extractLinks(doc: Document, baseUrl: string): { text: string; href: string }[] {
+  const links: { text: string; href: string }[] = [];
+  const seenHrefs = new Set<string>();
+  const anchorElements = doc.querySelectorAll('a[href]');
+
+  for (const el of anchorElements) {
+    if (links.length >= 100) break;
+
+    const href = el.getAttribute('href');
+    if (!href) continue;
+
+    // Resolve relative URLs
+    let absoluteHref: string;
+    try {
+      absoluteHref = new URL(href, baseUrl).href;
+    } catch {
+      continue;
+    }
+
+    // Skip internal anchors and duplicates
+    if (absoluteHref.startsWith('#') || seenHrefs.has(absoluteHref)) continue;
+    seenHrefs.add(absoluteHref);
+
+    const text = el.textContent?.trim() || '';
+    if (text && absoluteHref) {
+      links.push({ text, href: absoluteHref });
+    }
+  }
+
+  return links;
+}
+
+function extractImages(doc: Document, baseUrl: string): { src: string; alt: string }[] {
+  const images: { src: string; alt: string }[] = [];
+  const imgElements = doc.querySelectorAll('img[src]');
+
+  imgElements.forEach((el) => {
+    const src = el.getAttribute('src');
+    if (!src) return;
+
+    // Resolve relative URLs
+    let absoluteSrc: string;
+    try {
+      absoluteSrc = new URL(src, baseUrl).href;
+    } catch {
+      return;
+    }
+
+    const alt = el.getAttribute('alt') || '';
+    images.push({ src: absoluteSrc, alt });
+  });
+
+  return images;
+}
+
+function extractWikipediaData(doc: Document): { infobox?: Record<string, string>; categories?: string[]; references?: string[] } {
+  const result: { infobox?: Record<string, string>; categories?: string[]; references?: string[] } = {};
+
+  // Extract infobox data
+  const infobox = doc.querySelector('.infobox');
+  if (infobox) {
+    const infoboxData: Record<string, string> = {};
+    const rows = infobox.querySelectorAll('tr');
+    rows.forEach((row) => {
+      const th = row.querySelector('th');
+      const td = row.querySelector('td');
+      if (th && td) {
+        const key = th.textContent?.trim() || '';
+        const value = td.textContent?.trim() || '';
+        if (key && value) {
+          infoboxData[key] = value;
+        }
+      }
+    });
+    if (Object.keys(infoboxData).length > 0) {
+      result.infobox = infoboxData;
+    }
+  }
+
+  // Extract categories
+  const categoryLinks = doc.querySelectorAll('#mw-normal-catlinks ul li a');
+  if (categoryLinks.length > 0) {
+    result.categories = Array.from(categoryLinks)
+      .map((el) => el.textContent?.trim() || '')
+      .filter((text) => text.length > 0);
+  }
+
+  // Extract references (citation text)
+  const refList = doc.querySelectorAll('.references li');
+  if (refList.length > 0) {
+    result.references = Array.from(refList)
+      .slice(0, 50) // Limit to 50 references
+      .map((el) => el.textContent?.trim() || '')
+      .filter((text) => text.length > 0);
+  }
+
+  return result;
+}
 
 // Helper to validate YouTube URL
 const isYoutubeUrl = (url: string) => {
@@ -109,27 +221,7 @@ export async function GET() {
 // 2. Main POST Handler
 export async function POST(request: Request) {
   try {
-    // 1. Auth Check
-    const user = await currentUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // 2. Limit Check
-    const isPro = (user.publicMetadata as any).isPro === true;
-    if (!isPro) {
-      const docCount = await prisma.document.count({
-        where: { userId: user.id }
-      });
-
-      if (docCount >= 20) {
-         return NextResponse.json({
-           error: 'Free limit reached (20 docs). Upgrade to Pro for unlimited access.'
-         }, { status: 403 });
-      }
-    }
-
-    // 3. Parse Body
+    // Parse Body
     let body;
     const text = await request.text();
     try {
@@ -137,22 +229,11 @@ export async function POST(request: Request) {
     } catch (e) {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
-    
+
     const { url } = body;
     if (!url) return NextResponse.json({ error: 'URL is required' }, { status: 400 });
 
-    // 4. User Sync
-    try {
-      await prisma.user.upsert({
-        where: { id: user.id },
-        update: { email: user.emailAddresses[0].emailAddress },
-        create: { id: user.id, email: user.emailAddresses[0].emailAddress },
-      });
-    } catch (dbError) {
-      console.error("DB Sync Error (Non-fatal):", dbError);
-    }
-
-    // 5. Processing Logic
+    // Processing Logic
     let title = '';
     let markdown = '';
     let siteName = '';
@@ -163,18 +244,18 @@ export async function POST(request: Request) {
     if (isYoutubeUrl(url)) {
       // --- YOUTUBE METADATA MODE (FAST) ---
       siteName = 'YouTube';
-      
+
       try {
         // Fetch ONLY metadata, skip transcript for now
         const metadata = await getYouTubeMetadata(url);
-        
+
         title = metadata?.title || `YouTube Transcript: ${url}`;
         siteName = metadata?.channel || 'YouTube';
-        
+
         // Construct Initial Markdown
         markdown = `# ${title}\n`;
         markdown += `**Channel:** ${siteName} | **Source:** [YouTube](${url})\n\n`;
-        
+
         if (metadata?.description) {
           markdown += `> ${metadata.description}\n\n`;
         }
@@ -188,7 +269,7 @@ export async function POST(request: Request) {
         content += `<p><em>Fetching transcript...</em></p>`;
 
         textContent = `${title}\nChannel: ${siteName}\n\n${metadata?.description || ''}\n\nFetching transcript...`;
-        
+
         needsTranscript = true;
 
       } catch (ytError: any) {
@@ -198,6 +279,12 @@ export async function POST(request: Request) {
 
     } else {
       // --- WEB SCRAPER MODE (STANDARD) ---
+      let headings: { level: number; text: string }[] = [];
+      let links: { text: string; href: string }[] = [];
+      let images: { src: string; alt: string }[] = [];
+      let language = '';
+      let wikipedia: { infobox?: Record<string, string>; categories?: string[]; references?: string[] } | undefined;
+
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
@@ -216,8 +303,25 @@ export async function POST(request: Request) {
 
         const html = await response.text();
         const cleanHtml = DOMPurify.sanitize(html);
-        const doc = new JSDOM(cleanHtml, { url });
-        const reader = new Readability(doc.window.document);
+        const dom = new JSDOM(cleanHtml, { url });
+        const doc = dom.window.document;
+
+        // Extract language from HTML
+        language = doc.documentElement.getAttribute('lang') || '';
+
+        // Extract structured data before Readability modifies the DOM
+        headings = extractHeadings(doc);
+        links = extractLinks(doc, url);
+        images = extractImages(doc, url);
+
+        // Extract Wikipedia-specific data if applicable
+        if (url.includes('wikipedia.org')) {
+          // Re-parse original HTML for Wikipedia extraction (without sanitization to preserve Wikipedia classes)
+          const wikiDom = new JSDOM(html, { url });
+          wikipedia = extractWikipediaData(wikiDom.window.document);
+        }
+
+        const reader = new Readability(doc);
         const article = reader.parse();
 
         if (!article || !article.content) {
@@ -228,7 +332,7 @@ export async function POST(request: Request) {
         siteName = article.siteName || new URL(url).hostname;
         content = article.content || '';
         textContent = article.textContent || '';
-        
+
         const turndownService = new TurndownService({
           headingStyle: 'atx',
           codeBlockStyle: 'fenced',
@@ -237,52 +341,53 @@ export async function POST(request: Request) {
         });
 
         turndownService.remove(['script', 'style', 'noscript', 'iframe']);
-        
+
         markdown = turndownService.turndown(article.content);
 
       } catch (scrapeError: any) {
         console.error("Scraping Error:", scrapeError);
         return NextResponse.json({ error: scrapeError.message || 'Failed to scrape URL' }, { status: 422 });
       }
-    }
 
-    // 6. Save to DB
-    try {
-      const savedDoc = await prisma.document.create({
-        data: {
-          url,
-          title: title || 'Untitled',
-          siteName: siteName,
-          markdown,
-          userId: user.id,
-        },
-      });
+      // Calculate word count
+      const wordCount = textContent.split(/\s+/).filter(word => word.length > 0).length;
 
+      // Return the processed content with enhanced metadata
       return NextResponse.json({
-        id: savedDoc.id,
+        id: 'doc-' + crypto.randomUUID(),
         title,
         markdown,
         content,
         textContent,
         siteName,
         status: 'success',
-        needsTranscript
-      });
-
-    } catch (dbError: any) {
-      console.error("DB Save Error:", dbError);
-      return NextResponse.json({
-        id: 'temp-' + crypto.randomUUID(),
-        title,
-        markdown,
-        content,
-        textContent,
-        siteName,
-        status: 'success',
-        warning: 'Could not save to history',
-        needsTranscript
+        needsTranscript,
+        // New enhanced fields
+        sourceUrl: url,
+        scrapedAt: new Date().toISOString(),
+        wordCount,
+        language,
+        headings,
+        links,
+        images,
+        ...(wikipedia && Object.keys(wikipedia).length > 0 ? { wikipedia } : {})
       });
     }
+
+    // Return for YouTube (no enhanced extraction for YouTube)
+    return NextResponse.json({
+      id: 'doc-' + crypto.randomUUID(),
+      title,
+      markdown,
+      content,
+      textContent,
+      siteName,
+      status: 'success',
+      needsTranscript,
+      sourceUrl: url,
+      scrapedAt: new Date().toISOString(),
+      wordCount: textContent.split(/\s+/).filter(word => word.length > 0).length
+    });
 
   } catch (globalError: any) {
     console.error("CRITICAL API ERROR:", globalError);

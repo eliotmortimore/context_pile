@@ -1,8 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { Clipboard, FileDown, Loader2, FileText, Code, Eye, Plus, Trash2, Play, CheckCircle2, XCircle, LogIn } from 'lucide-react';
-import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
+import { useState, useRef, useEffect } from 'react';
+import { Clipboard, FileDown, Loader2, FileText, Code, Eye, Plus, Trash2, Play, CheckCircle2, XCircle, ChevronDown } from 'lucide-react';
 
 interface ParseResult {
   id?: string;
@@ -13,7 +12,20 @@ interface ParseResult {
   siteName: string;
   byline?: string;
   excerpt?: string;
-  needsTranscript?: boolean; // New Flag
+  needsTranscript?: boolean;
+  // Enhanced metadata fields
+  sourceUrl?: string;
+  scrapedAt?: string;
+  wordCount?: number;
+  language?: string;
+  headings?: { level: number; text: string }[];
+  links?: { text: string; href: string }[];
+  images?: { src: string; alt: string }[];
+  wikipedia?: {
+    infobox?: Record<string, string>;
+    categories?: string[];
+    references?: string[];
+  };
 }
 
 interface DocItem {
@@ -25,15 +37,26 @@ interface DocItem {
 }
 
 export default function Home() {
-  const { isSignedIn, isLoaded } = useUser();
   const [inputUrls, setInputUrls] = useState('');
   const [documents, setDocuments] = useState<DocItem[]>([]);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'markdown' | 'text' | 'preview'>('markdown');
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close export menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setExportMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Parse URLs from textarea
   const handleCompile = async () => {
-    if (!isSignedIn) return; // Should be blocked by UI, but double check
     if (!inputUrls.trim()) return;
 
     const urls = inputUrls
@@ -131,21 +154,21 @@ export default function Home() {
 
       } else {
           // Standard success
-          setDocuments(prev => prev.map(d => 
-            d.id === doc.id 
-              ? { ...d, status: 'success', result: data } 
+          setDocuments(prev => prev.map(d =>
+            d.id === doc.id
+              ? { ...d, status: 'success', result: data }
               : d
           ));
-          
+
           // Auto-select if it's the first one
           setSelectedDocId(curr => curr === null ? doc.id : curr);
       }
 
     } catch (err: any) {
       // Update error
-      setDocuments(prev => prev.map(d => 
-        d.id === doc.id 
-          ? { ...d, status: 'error', error: err.message } 
+      setDocuments(prev => prev.map(d =>
+        d.id === doc.id
+          ? { ...d, status: 'error', error: err.message }
           : d
       ));
     }
@@ -182,12 +205,51 @@ export default function Home() {
     URL.revokeObjectURL(url);
   };
 
+  const exportAsJson = (doc: DocItem) => {
+    if (!doc.result) return;
+
+    const exportData = {
+      exportVersion: '1.0',
+      exportedAt: new Date().toISOString(),
+      document: {
+        id: doc.result.id || doc.id,
+        sourceUrl: doc.result.sourceUrl || doc.url,
+        title: doc.result.title,
+        siteName: doc.result.siteName,
+        scrapedAt: doc.result.scrapedAt || new Date().toISOString(),
+        content: {
+          markdown: doc.result.markdown,
+          plainText: doc.result.textContent,
+          wordCount: doc.result.wordCount || doc.result.textContent.split(/\s+/).filter(w => w.length > 0).length
+        },
+        structure: {
+          headings: doc.result.headings || [],
+          links: doc.result.links || [],
+          images: doc.result.images || []
+        },
+        ...(doc.result.language ? { language: doc.result.language } : {}),
+        ...(doc.result.wikipedia ? { wikipedia: doc.result.wikipedia } : {})
+      }
+    };
+
+    const filename = `${doc.result.title.replace(/[^a-z0-9]/gi, '_').substring(0, 50)}.json`;
+    downloadFile(JSON.stringify(exportData, null, 2), filename, 'application/json');
+    setExportMenuOpen(false);
+  };
+
+  const exportAsMarkdown = (doc: DocItem) => {
+    if (!doc.result) return;
+    const filename = `${doc.result.title.replace(/[^a-z0-9]/gi, '_').substring(0, 50)}.md`;
+    downloadFile(doc.result.markdown, filename, 'text/markdown');
+    setExportMenuOpen(false);
+  };
+
   // Get selected document
   const selectedDoc = documents.find(d => d.id === selectedDocId);
 
   return (
     <div className="flex h-screen bg-[#0a0a0a] text-zinc-100 font-sans overflow-hidden">
-      
+
       {/* Sidebar */}
       <aside className="w-80 flex flex-col border-r border-zinc-800 bg-[#0f0f0f]">
         <div className="p-4 border-b border-zinc-800 flex justify-between items-center">
@@ -195,38 +257,23 @@ export default function Home() {
             <div className="w-2 h-6 bg-blue-600 rounded-full"></div>
             ContextPile
           </h1>
-          {isLoaded && (
-             isSignedIn ? <UserButton /> : null
-          )}
         </div>
 
-        {/* Input Area (Mini) */}
+        {/* Input Area */}
         <div className="p-4 border-b border-zinc-800 space-y-3">
-          {isLoaded && !isSignedIn ? (
-            <div className="h-24 flex items-center justify-center bg-zinc-900 border border-zinc-700 rounded-lg border-dashed">
-               <SignInButton mode="modal">
-                 <button className="flex items-center gap-2 text-sm text-zinc-400 hover:text-white transition">
-                   <LogIn className="w-4 h-4" /> Sign in to compile
-                 </button>
-               </SignInButton>
-            </div>
-          ) : (
-            <>
-              <textarea
-                className="w-full h-24 bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-xs text-zinc-300 placeholder:text-zinc-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
-                placeholder="Paste URLs here (one per line)..."
-                value={inputUrls}
-                onChange={(e) => setInputUrls(e.target.value)}
-              />
-              <button
-                onClick={handleCompile}
-                disabled={!inputUrls.trim()}
-                className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium py-2 rounded-lg transition-colors"
-              >
-                <Play className="w-4 h-4" /> Compile
-              </button>
-            </>
-          )}
+          <textarea
+            className="w-full h-24 bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-xs text-zinc-300 placeholder:text-zinc-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
+            placeholder="Paste URLs here (one per line)..."
+            value={inputUrls}
+            onChange={(e) => setInputUrls(e.target.value)}
+          />
+          <button
+            onClick={handleCompile}
+            disabled={!inputUrls.trim()}
+            className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium py-2 rounded-lg transition-colors"
+          >
+            <Play className="w-4 h-4" /> Compile
+          </button>
         </div>
 
         {/* Document List */}
@@ -236,8 +283,8 @@ export default function Home() {
               key={doc.id}
               onClick={() => setSelectedDocId(doc.id)}
               className={`group flex items-center justify-between p-3 rounded-lg cursor-pointer transition-colors ${
-                selectedDocId === doc.id 
-                  ? 'bg-zinc-800 border-zinc-700' 
+                selectedDocId === doc.id
+                  ? 'bg-zinc-800 border-zinc-700'
                   : 'hover:bg-zinc-900 border border-transparent'
               }`}
             >
@@ -247,7 +294,7 @@ export default function Home() {
                 {doc.status === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />}
                 {doc.status === 'error' && <XCircle className="w-4 h-4 text-red-500 shrink-0" />}
                 {doc.status === 'pending' && <div className="w-4 h-4 rounded-full border-2 border-zinc-600 shrink-0" />}
-                
+
                 <div className="flex flex-col min-w-0">
                   <span className={`text-sm font-medium truncate ${selectedDocId === doc.id ? 'text-white' : 'text-zinc-400 group-hover:text-zinc-200'}`}>
                     {doc.result?.title || doc.url}
@@ -256,7 +303,7 @@ export default function Home() {
                 </div>
               </div>
 
-              <button 
+              <button
                 onClick={(e) => removeDoc(doc.id, e)}
                 className="opacity-0 group-hover:opacity-100 p-1 hover:bg-zinc-700 rounded text-zinc-500 hover:text-red-400 transition"
               >
@@ -329,13 +376,37 @@ export default function Home() {
                 >
                   <Clipboard className="w-4 h-4" />
                 </button>
-                <button
-                  onClick={() => downloadFile(selectedDoc.result!.markdown, 'context.md', 'text/markdown')}
-                  className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition border border-transparent hover:border-zinc-700"
-                  title="Download .md"
-                >
-                  <FileDown className="w-4 h-4" />
-                </button>
+
+                {/* Export Dropdown */}
+                <div className="relative" ref={exportMenuRef}>
+                  <button
+                    onClick={() => setExportMenuOpen(!exportMenuOpen)}
+                    className="flex items-center gap-1 px-3 py-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition border border-transparent hover:border-zinc-700"
+                    title="Export"
+                  >
+                    <FileDown className="w-4 h-4" />
+                    <ChevronDown className="w-3 h-3" />
+                  </button>
+
+                  {exportMenuOpen && (
+                    <div className="absolute right-0 mt-2 w-40 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 overflow-hidden">
+                      <button
+                        onClick={() => exportAsMarkdown(selectedDoc)}
+                        className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition"
+                      >
+                        <Code className="w-4 h-4" />
+                        Export .md
+                      </button>
+                      <button
+                        onClick={() => exportAsJson(selectedDoc)}
+                        className="w-full px-4 py-2.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2 transition border-t border-zinc-800"
+                      >
+                        <FileText className="w-4 h-4" />
+                        Export .json
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </header>
 
@@ -349,16 +420,11 @@ export default function Home() {
                 )}
                 {activeTab === 'text' && (
                   <pre className="whitespace-pre-wrap font-sans text-sm text-zinc-300 leading-relaxed max-w-none">
-                    {/* We use markdown as the source for text view too if user wants structure, 
-                        or we can use textContent. Let's use textContent but maybe clean it up? 
-                        The user asked for headings in text. textContent might strip them. 
-                        Let's use markdown but styled as text? No, let's use textContent. 
-                    */}
                     {selectedDoc.result.textContent}
                   </pre>
                 )}
                 {activeTab === 'preview' && (
-                  <div 
+                  <div
                     className="prose prose-invert prose-blue max-w-none"
                     dangerouslySetInnerHTML={{ __html: selectedDoc.result.content }}
                   />
@@ -392,4 +458,3 @@ export default function Home() {
     </div>
   );
 }
-// Force rebuild Thu Dec 11 00:08:08 PST 2025
